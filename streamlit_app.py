@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import date
 
-from app.logic import (
+from logic import (
     compute_financials,
     build_report_text,
     extract_case_metadata_from_study_plan,
@@ -162,3 +162,4 @@ if st.button("Generate financial report"):
                 )
 
                 st.code(report_text, language="text")
+
