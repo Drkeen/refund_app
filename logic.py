@@ -498,6 +498,9 @@ def compute_financials(
     df["action"] = df.apply(classify_action, axis=1)
     df["unit_price"] = df["unit_price"].fillna(0.0)
 
+    # 🔹 NEW: drop any units with no financial impact (net $0.00)
+    df = df[df["unit_price"] > 0].copy()
+
     # Engagement summary string for display/report
     def format_eng(row) -> str:
         if row["engagement_status"] == "ENG":
