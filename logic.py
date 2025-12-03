@@ -498,7 +498,11 @@ def compute_financials(
     df["action"] = df.apply(classify_action, axis=1)
     df["unit_price"] = df["unit_price"].fillna(0.0)
 
-    # 🔹 NEW: drop any units with no financial impact (net $0.00)
+    # 🔹 Drop units where we could not determine a valid action
+    #     (typically planned/old/irrelevant instances with no matching EASD)
+    df = df[df["action"] != "UNKNOWN"].copy()
+
+    # 🔹 Drop any units with no financial impact (net $0.00)
     df = df[df["unit_price"] > 0].copy()
 
     # Engagement summary string for display/report
@@ -508,6 +512,7 @@ def compute_financials(
         return "NATT"
 
     df["engagement_summary"] = df.apply(format_eng, axis=1)
+
 
     # Group for totals
     def action_group(action: str) -> str:
