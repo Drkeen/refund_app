@@ -21,7 +21,6 @@ def _file_to_bytes(file) -> bytes:
     """Safely get raw bytes from a Streamlit UploadedFile or file-like object."""
     if hasattr(file, "getvalue"):
         return file.getvalue()
-    # fallback for plain file-like objects
     return file.read()
 
 
@@ -48,7 +47,7 @@ def load_study_plan_excel(file) -> pd.DataFrame:
         raise ValueError("Could not find 'Enrolment Activity Start Date' header in study plan file.")
 
     header = raw.iloc[header_row_idx]
-    df = raw.iloc[header_row_idx + 1 :].copy()
+    df = raw.iloc[header_row_idx + 1:].copy()
     df.columns = header
 
     df = _normalise_columns(df)
@@ -86,11 +85,11 @@ def load_engagement_excel(file) -> pd.DataFrame:
     We dynamically detect the header row by looking for the 'Recorded Hours' column,
     then normalise the columns.
 
-    We expect at minimum:
-      - a unit-code-like column (e.g. 'Curriculum Item')
-      - 'Recorded Hours' -> engagement hours, formatted like '32.97 hours'
-      - 'Unit Start Date' (used to line up with EASD)
-      - a 'Pass / Fail' style column for unit status
+    Expected (after normalisation):
+      - 'curriculum_item' (unit code)
+      - 'recorded_hours' -> engagement hours (e.g. '32.97 hours')
+      - 'unit_start_date' (optional, for aligning with EASD)
+      - a 'pass/fail' style column for unit status.
     """
     raw = pd.read_excel(file, header=None)
 
@@ -106,15 +105,10 @@ def load_engagement_excel(file) -> pd.DataFrame:
         raise ValueError("Could not find a 'Recorded Hours' header in the engagement file.")
 
     header = raw.iloc[header_row_idx]
-    df = raw.iloc[header_row_idx + 1 :].copy()
+    df = raw.iloc[header_row_idx + 1:].copy()
     df.columns = header
 
     df = _normalise_columns(df)
-    # Now we expect (names may vary slightly, but normalised):
-    #   'recorded_hours'
-    #   'curriculum_item'
-    #   'unit_start_date'
-    #   'pass_/_fail' or similar
 
     if "recorded_hours" not in df.columns:
         raise ValueError("Engagement file must contain a 'Recorded Hours' column.")
@@ -150,8 +144,6 @@ def load_engagement_excel(file) -> pd.DataFrame:
             break
 
     # Recorded hours are strings like "32.97 hours" or "49,47 hours"
-    # 1) normalise decimal comma to dot
-    # 2) extract just the numeric portion
     df["recorded_hours"] = (
         df["recorded_hours"]
         .astype(str)
@@ -253,11 +245,10 @@ def load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
         raise ValueError("Could not find 'Txn Amt' header in student account file.")
 
     header = raw.iloc[header_row_idx]
-    df = raw.iloc[header_row_idx + 1 :].copy()
+    df = raw.iloc[header_row_idx + 1:].copy()
     df.columns = header
 
     df = _normalise_columns(df)
-    # Now we expect 'ssp_spk_cd' and 'txn_amt'
 
     required = ["ssp_spk_cd", "txn_amt"]
     for col in required:
@@ -288,31 +279,21 @@ def load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
     return unit_prices, account_balance
 
 
-# ---------- Metadata extraction from Study Plan ----------
+# ---------- Metadata extraction (student number + course info) ----------
 
 def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
     """
     Detect case metadata using:
       - Student number: prefer Unit Engagement (more consistent)
       - Course code + course name: from Study Plan
-
-    Returns:
-      {
-        "student_number": str | None,
-        "course_code": str | None,
-        "course_name": str | None,
-        "first_name": None,
-        "last_name": None,
-      }
     """
-    # ---------- 1. Student number from Engagement (if provided) ----------
+    # 1. Student number from Engagement (if provided)
     student_number: str | None = None
 
     if engagement_file is not None:
         eng_bytes = _file_to_bytes(engagement_file)
         raw_eng = pd.read_excel(BytesIO(eng_bytes), header=None)
 
-        # Scan all cells for something like 476267132 or 476 267 132
         for i in range(len(raw_eng)):
             row = raw_eng.iloc[i].astype(str)
             tokens = " ".join(row).split()
@@ -324,7 +305,7 @@ def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
             if student_number:
                 break
 
-    # ---------- 2. Course code + course name from Study Plan ----------
+    # 2. Course code + course name from Study Plan
     course_code: str | None = None
     course_name: str | None = None
 
@@ -345,22 +326,21 @@ def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
         text = " ".join(parts)
         tokens = text.split()
 
-        # ---- Course code (qual code, e.g. FNS40222) ----
+        # Course code
         if course_code is None:
             m2 = course_pattern.search(text)
             if m2:
                 course_code = m2.group()
 
-        # ---- Course name: taken from the same line as the course code ----
+        # Course name (from same line as course code)
         if course_code and course_name is None and course_code in tokens:
             code_idx = tokens.index(course_code)
 
-            # Look for a "level" keyword later in the line (Cert, CIII, Diploma, etc.)
             level_keywords = {
                 "CII", "CIII", "CIV", "CV",
                 "CERT", "CERTIFICATE",
                 "DIPLOMA", "ADVANCED",
-                "BACHELOR", "GRADUATE"
+                "BACHELOR", "GRADUATE",
             }
             level_idx = None
             for idx in range(code_idx + 1, len(tokens)):
@@ -369,7 +349,6 @@ def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
                     level_idx = idx
                     break
 
-            # Start of the name:
             start_idx = level_idx if level_idx is not None else code_idx + 1
 
             name_tokens: list[str] = []
@@ -399,9 +378,15 @@ def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
         "student_number": student_number,
         "course_code": course_code,
         "course_name": course_name,
-        "first_name": None,
-        "last_name": None,
     }
+
+
+def extract_case_metadata_from_study_plan(file) -> dict:
+    """
+    Backwards-compatible wrapper: keeps the old name if something else calls it.
+    """
+    return extract_case_metadata(file, engagement_file=None)
+
 
 # ---------- Core financial logic ----------
 
@@ -419,11 +404,11 @@ def compute_financials(
         units_df: columns
           - unit_code
           - unit_name
-          - unit_status (ENROLLED / PLANNED / PASSED / FAILED / WITHDRAWN / UNKNOWN)
-          - engagement_status ("ENG" / "NATT")
-          - engagement_hours (float)
-          - engagement_summary (string "ENG: 32.97" or "NATT")
-          - action (Fee Waiver / EWID variants)
+          - unit_status
+          - engagement_status
+          - engagement_hours
+          - engagement_summary
+          - action
           - unit_price
           - easd
           - days_from_easd
@@ -432,7 +417,6 @@ def compute_financials(
         total_ewid,       n_ewid
         estimated_balance_after_changes
     """
-    # Get raw bytes once and feed loaders with BytesIO
     sp_bytes = _file_to_bytes(study_plan_file)
     eng_bytes = _file_to_bytes(engagement_file)
     acc_bytes = _file_to_bytes(student_account_file)
@@ -441,8 +425,7 @@ def compute_financials(
     eng_df = load_engagement_excel(BytesIO(eng_bytes))
     prices_df, account_balance = load_student_account_excel(BytesIO(acc_bytes))
 
-    # Merge: Study Plan (master list) + Engagement + Unit prices
-    # Prefer to align engagement on both unit_code AND start date matching EASD
+    # Merge: Study Plan + Engagement + Unit prices
     if "unit_start_date" in eng_df.columns:
         df = sp_df.merge(
             eng_df[["unit_code", "recorded_hours", "unit_start_date", "unit_status"]],
@@ -465,23 +448,19 @@ def compute_financials(
         selected_units = [u.strip().upper() for u in selected_units if u.strip()]
         df = df[df["unit_code"].isin(selected_units)].copy()
 
-    # Ensure we have a clean status field
+    # Clean status
     df["unit_status"] = df["unit_status"].fillna("UNKNOWN")
 
-    # Filter out units that cannot / need not be altered:
-    # Filter out units that cannot / need not be altered:
-    #   - PLANNED: no fees yet
-    #   - PASSED / FAILED: outcomes locked; financials usually fixed
+    # Filter out units that cannot / need not be altered
     df = df[~df["unit_status"].isin(["PASSED", "FAILED", "PLANNED"])].copy()
 
     # Filter out cluster "units" – codes starting with 'CLS'
     df = df[~df["unit_code"].str.upper().str.startswith("CLS")].copy()
 
     # Filter out the course code itself (e.g. ACM30321 line)
-    if hasattr(sp_df, "unit_code"):
-        course_code_main = sp_df["unit_code"].iloc[0].strip().upper()
-        df = df[df["unit_code"] != course_code_main]
-
+    if "unit_code" in sp_df.columns and not sp_df.empty:
+        course_code_main = str(sp_df["unit_code"].iloc[0]).strip().upper()
+        df = df[df["unit_code"].str.upper() != course_code_main]
 
     # Engagement: hours + ENG/NATT
     df["recorded_hours"] = df["recorded_hours"].fillna(0.0)
@@ -490,10 +469,8 @@ def compute_financials(
         lambda h: "ENG" if h > 0 else "NATT"
     )
 
-    # Ensure EASD is datetime, not mixed
+    # Ensure EASD is datetime & compute days_from_easd
     df["easd"] = pd.to_datetime(df["easd"], errors="coerce")
-
-    # Days from EASD (using pandas timestamps to avoid date/datetime issues)
     req_ts = pd.to_datetime(request_date)
     df["days_from_easd"] = (req_ts - df["easd"]).dt.days
 
@@ -504,16 +481,12 @@ def compute_financials(
         if pd.isna(days):
             return "UNKNOWN"
 
-        # Engaged units
         if status == "ENG":
-            # > 2 weeks after EASD -> Fee Waiver
             if days > 14:
                 return "Fee Waiver"
-            # <= 2 weeks from EASD -> EWID and remove engagement
             return "EWID (remove engagement)"
 
-        # NATT units (no engagement)
-        # Distinguish pre vs post EASD, without repeating (NATT) in the label
+        # NATT
         if days > 0:
             return "Post EASD EWID"
         else:
@@ -522,14 +495,11 @@ def compute_financials(
     df["action"] = df.apply(classify_action, axis=1)
     df["unit_price"] = df["unit_price"].fillna(0.0)
 
-    # 🔹 Drop units where we could not determine a valid action
-    #     (typically planned/old/irrelevant instances with no matching EASD)
+    # Drop units with UNKNOWN action (planned/old/irrelevant) and zero-dollar units
     df = df[df["action"] != "UNKNOWN"].copy()
-
-    # 🔹 Drop any units with no financial impact (net $0.00)
     df = df[df["unit_price"] > 0].copy()
 
-    # Engagement summary string for display/report
+    # Engagement summary string
     def format_eng(row) -> str:
         if row["engagement_status"] == "ENG":
             return f"ENG: {row['engagement_hours']:.2f}"
@@ -537,8 +507,7 @@ def compute_financials(
 
     df["engagement_summary"] = df.apply(format_eng, axis=1)
 
-
-    # Group for totals
+    # Totals
     def action_group(action: str) -> str:
         if "Fee Waiver" in action:
             return "Fee Waiver"
@@ -566,7 +535,6 @@ def compute_financials(
     total_reversal = total_fee_waiver + total_ewid
     estimated_balance = account_balance - total_reversal
 
-    # Final DataFrame returned to the UI / report builder
     units_df = df[
         [
             "unit_code",
@@ -593,7 +561,7 @@ def compute_financials(
     )
 
 
-# ---------- Report text builder ----------
+# ---------- Recommendation builder ----------
 
 def build_recommendation_text(
     units_df: pd.DataFrame,
@@ -604,43 +572,23 @@ def build_recommendation_text(
 ) -> str:
     """
     Build the delegate-facing recommendation text.
-
-    Logic:
-    - Describe the FREFs (Fee Waiver / EWID) in terms of:
-        * type (WID FREF / EWID FREF)
-        * number of units
-        * dollar breakdown
-    - Then rewrite the financial summary:
-        * If estimated_balance >= 0:
-              " = $X credited to student account. $Y ODT."
-        * If estimated_balance < 0:
-              " = $X credited to student account. $Z credit - $100.00
-               Administration fee = $R refund to student."
     """
-
-    # Nothing to recommend if there are no reversals
     total_reversal = total_fee_waiver + total_ewid
     if total_reversal <= 0:
         return ""
 
     lines: list[str] = []
 
-    # ---- Group units by action type ----
     fw_units = units_df[units_df["action"] == "Fee Waiver"].copy()
     ewid_units = units_df[units_df["action"].str.contains("EWID")].copy()
 
     def build_group_chunk(group_df: pd.DataFrame, header: str, label: str) -> str:
-        """
-        Build a text chunk like:
-          "Post EASD WID FREF 2 units and apply fee waiver of $1,054.00 (2 @ $527.00)"
-        """
         if group_df.empty:
             return ""
 
         n_units = len(group_df)
         group_total = float(group_df["unit_price"].sum())
 
-        # Group by price for breakdown
         price_counts = (
             group_df.groupby("unit_price")
             .size()
@@ -665,7 +613,6 @@ def build_recommendation_text(
             f"${group_total:,.2f} {breakdown}"
         )
 
-    # --- Build Fee Waiver chunk (Post EASD WID FREF) ---
     if not fw_units.empty:
         lines.append(
             build_group_chunk(
@@ -675,9 +622,7 @@ def build_recommendation_text(
             )
         )
 
-    # --- Build EWID chunk(s) ---
     if not ewid_units.empty:
-        # Split into Pre / Post where possible
         pre = ewid_units[ewid_units["action"].str.contains("Pre")].copy()
         post = ewid_units[ewid_units["action"].str.contains("Post")].copy()
         mid = ewid_units[ewid_units["action"] == "EWID (remove engagement)"].copy()
@@ -699,7 +644,6 @@ def build_recommendation_text(
                 )
             )
         if not mid.empty:
-            # Generic EWID FREF for the <= 2 weeks group
             lines.append(
                 build_group_chunk(
                     mid,
@@ -708,40 +652,33 @@ def build_recommendation_text(
                 )
             )
 
-    # Remove empty chunks if any
     lines = [ln for ln in lines if ln]
-
     if not lines:
         return ""
 
-    # ---- Now append the credit / ODT / refund part to the LAST line ----
-    # total_reversal is the total FREF amount for the case
     if estimated_balance >= 0:
-        # Still has outstanding debt after FREF
         tail = (
             f" = ${total_reversal:,.2f} credited to student account. "
             f"${estimated_balance:,.2f} ODT."
         )
     else:
-        # Student ends up in credit -> refund scenario
-        credit_after_fref = -estimated_balance  # how much they are in credit
+        credit_after_fref = -estimated_balance
         refund_amount = max(credit_after_fref - 100.0, 0.0)
-
         tail = (
             f" = ${total_reversal:,.2f} credited to student account. "
             f"${credit_after_fref:,.2f} credit - $100.00 Administration fee "
             f"= ${refund_amount:,.2f} refund to student."
         )
 
-    # Attach tail to the last chunk line
     lines[-1] = lines[-1] + tail
 
     return "\n".join(lines)
 
+
+# ---------- Report text builder ----------
+
 def build_report_text(
     student_number: str,
-    first_name: str,
-    last_name: str,
     request_type: str,
     request_date: date,
     submitted_by: str,
@@ -759,11 +696,11 @@ def build_report_text(
     lines: List[str] = []
 
     # Header
-    lines.append(f"{student_number} {first_name} {last_name}")
+    lines.append(f"{student_number}")
     lines.append("")
     lines.append(request_type)
     lines.append("")
-    lines.append(str(request_date))
+    lines.append(request_date.strftime("%d/%m/%Y"))
     lines.append("")
     lines.append(submitted_by)
     lines.append("")
@@ -776,7 +713,6 @@ def build_report_text(
             lines.append(f"- {u}")
         lines.append("")
 
-    # Student current financials
     lines.append("Student current financials:")
     lines.append("")
 
@@ -784,7 +720,6 @@ def build_report_text(
         status_str = row["unit_status"]
         eng_str = row["engagement_summary"]
 
-        # Hide ENROLLED in the final report (but keep other statuses)
         if status_str == "ENROLLED":
             bracket = f"[{eng_str}]"
         else:
@@ -794,16 +729,13 @@ def build_report_text(
             f"{row['unit_code']} {bracket} {row['action']} ${row['unit_price']:,.2f}"
         )
 
-
     lines.append("")
     lines.append("Totals:")
     lines.append(
-        f"Total Fee Waiver: ${total_fee_waiver:,.2f} "
-        f"({n_fee_waiver} unit(s))"
+        f"Total Fee Waiver: ${total_fee_waiver:,.2f} ({n_fee_waiver} unit(s))"
     )
     lines.append(
-        f"Total EWID: ${total_ewid:,.2f} "
-        f"({n_ewid} unit(s))"
+        f"Total EWID: ${total_ewid:,.2f} ({n_ewid} unit(s))"
     )
 
     total_reversal = total_fee_waiver + total_ewid
@@ -823,7 +755,7 @@ def build_report_text(
     else:
         lines.append("=> Remaining balance: $0.00 (no debt / refund).")
 
-    # ----- Recommendation -----
+    # Recommendation
     recommendation = build_recommendation_text(
         units_df=units_df,
         account_balance=account_balance,
