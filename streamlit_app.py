@@ -4,7 +4,7 @@ from datetime import date
 from logic import (
     compute_financials,
     build_report_text,
-    extract_case_metadata_from_study_plan,
+    extract_case_metadata,
 )
 
 
