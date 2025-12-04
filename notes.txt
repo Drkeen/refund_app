@@ -1,0 +1,14 @@
+Add a second section of per-unit decision which shows all units status
+
+Add logic to use the Last Date Attended data
+Add LDA data for timeline
+Add Further instruction to consider LDA into Intructions
+
+Further investigate the logic behind LDA including situationally such as when the student takes time off 
+study due to some circumstance but the student has attended after as shown by the LDA
+
+Consider further logic to enhance the reccomendation.
+
+Integrate a completed copy of the Recommendation Template to be filled in and finalised by the AI Gen
+
+Add example recommendations for AI assistance
