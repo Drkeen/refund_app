@@ -207,6 +207,9 @@ if special_flag:
                         "Please check file types and try again."
                     )
                 else:
+                    # Get earliest financially impactful EASD from session (if available)
+                    earliest_easd = st.session_state.get("earliest_easd", None)
+
                     with st.spinner("Calling AI to analyse documents..."):
                         try:
                             sc_summary = generate_special_circ_summary(
@@ -218,8 +221,10 @@ if special_flag:
                                 request_type=request_type,
                                 submitted_by=submitted_by,
                                 raw_docs_text=combined_text,
-                                image_files=sc_files,   # 👈 NEW
+                                earliest_easd=earliest_easd,
+                                image_files=sc_files,
                             )
+
 
                         except Exception as e:
                             st.error(f"Error generating AI summary: {e}")
