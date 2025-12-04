@@ -137,6 +137,19 @@ if st.button("Generate financial report"):
             if units_df.empty:
                 st.warning("No matching units found for the selected criteria.")
             else:
+                # Store units_df for potential later use
+                st.session_state["units_df"] = units_df
+
+                # Get earliest financially impactful EASD from units_df
+                earliest_easd_value = None
+                if "easd" in units_df.columns and not units_df["easd"].isna().all():
+                    earliest_easd_ts = units_df["easd"].min()
+                    if hasattr(earliest_easd_ts, "date"):
+                        earliest_easd_value = earliest_easd_ts.date()
+                    else:
+                        earliest_easd_value = earliest_easd_ts
+                st.session_state["earliest_easd"] = earliest_easd_value
+
                 st.dataframe(units_df)
 
                 st.subheader("Generated report text")
@@ -168,8 +181,8 @@ special_flag = st.checkbox("This case includes Special Circumstances documentati
 
 if special_flag:
     st.markdown(
-        "Upload any supporting documents (medical certificates, statements, emails, etc.). "
-        "The app will send them to an AI model to build a timeline and summary."
+        "Upload any supporting documents (medical certificates, statements, emails, screenshots, etc.). "
+        "The app will send them to an AI model to build a structured Special Circumstances assessment."
     )
 
     sc_files = st.file_uploader(
@@ -178,7 +191,6 @@ if special_flag:
         accept_multiple_files=True,
         key="support_docs",
     )
-
 
     if st.button("Generate Special Circumstances timeline and summary with AI"):
         if not sc_files:
@@ -191,6 +203,7 @@ if special_flag:
                     "Add OPENAI_API_KEY to your Streamlit secrets."
                 )
             else:
+                # Extract text from all non-image docs
                 combined_text_parts = []
                 for f in sc_files:
                     text = extract_text_from_file(f)
@@ -201,13 +214,15 @@ if special_flag:
 
                 combined_text = "\n\n\n".join(combined_text_parts).strip()
 
-                if not combined_text:
+                if not combined_text and not any(
+                    (getattr(f, "name", "").lower().endswith(ext) for f in sc_files for ext in (".png", ".jpg", ".jpeg"))
+                ):
                     st.error(
                         "Could not extract any text from the uploaded documents. "
                         "Please check file types and try again."
                     )
                 else:
-                    # Get earliest financially impactful EASD from session (if available)
+                    # Get earliest financially impactful EASD from previous financial run
                     earliest_easd = st.session_state.get("earliest_easd", None)
 
                     with st.spinner("Calling AI to analyse documents..."):
@@ -221,16 +236,14 @@ if special_flag:
                                 request_type=request_type,
                                 submitted_by=submitted_by,
                                 raw_docs_text=combined_text,
-                                earliest_easd=earliest_easd,
                                 image_files=sc_files,
+                                earliest_easd=earliest_easd,
                             )
-
-
                         except Exception as e:
                             st.error(f"Error generating AI summary: {e}")
                         else:
                             st.subheader(
-                                "AI-generated Special Circumstances timeline & summary"
+                                "AI-generated Special Circumstances assessment"
                             )
                             st.markdown(sc_summary)
                             st.caption(
