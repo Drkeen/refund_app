@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 from io import BytesIO
-from typing import List
+from typing import List, Iterable
+import base64
 
 from openai import OpenAI
 from pypdf import PdfReader
@@ -17,9 +18,16 @@ def extract_text_from_file(file) -> str:
     - .txt
     - .pdf
     - .docx
+
+    Image files (.png, .jpg, .jpeg) are handled separately via OpenAI Vision
+    in generate_special_circ_summary, so this function returns "" for them.
     """
     name = getattr(file, "name", "") or ""
     ext = name.split(".")[-1].lower() if "." in name else ""
+
+    # Images: we don't OCR locally; handled via Vision later
+    if ext in ("png", "jpg", "jpeg"):
+        return ""
 
     # Get raw bytes
     if hasattr(file, "getvalue"):
@@ -64,6 +72,44 @@ def extract_text_from_file(file) -> str:
         return ""
 
 
+def _image_files_to_content_blocks(files: Iterable) -> List[dict]:
+    """
+    Convert uploaded image files to OpenAI 'input_image' content blocks
+    using data URLs.
+    """
+    blocks: List[dict] = []
+    for f in files or []:
+        name = getattr(f, "name", "") or ""
+        ext = name.split(".")[-1].lower() if "." in name else ""
+        if ext not in ("png", "jpg", "jpeg"):
+            continue
+
+        if hasattr(f, "getvalue"):
+            data = f.getvalue()
+        else:
+            data = f.read()
+
+        if not data:
+            continue
+
+        if ext == "png":
+            mime = "image/png"
+        else:
+            mime = "image/jpeg"
+
+        b64 = base64.b64encode(data).decode("ascii")
+        data_url = f"data:{mime};base64,{b64}"
+
+        blocks.append(
+            {
+                "type": "input_image",
+                "image_url": {"url": data_url},
+            }
+        )
+
+    return blocks
+
+
 def build_special_circ_input_items(
     student_number: str,
     course_code: str,
@@ -72,10 +118,11 @@ def build_special_circ_input_items(
     request_type: str,
     submitted_by: str,
     raw_docs_text: str,
+    image_files: Iterable | None = None,
 ) -> list[dict]:
     """
     Build the input items for the OpenAI Responses API, using TAFE QLD
-    special circumstances wording and structure.
+    special circumstances wording and structure, including optional images.
     """
     header_context = f"""You are assisting with a TAFE Queensland fee review for a Special Circumstances case.
 
@@ -90,7 +137,6 @@ You are given supporting documentation (medical certificates, statements, emails
 Your job is to assess the case against TAFE Queensland's Special Circumstances guidelines and produce structured notes suitable for an internal recommendation.
 """
 
-    # Policy + instructions baked into the prompt:
     instructions = """
 TAFE Queensland defines special circumstances as those that:
 - Are beyond the student's control;
@@ -194,17 +240,22 @@ Important:
 - Keep wording neutral and professional, suitable for internal recommendation notes.
 """
 
-    docs_section = f"---\nSUPPORTING DOCUMENTS (raw text):\n\n{raw_docs_text}\n---"
+    # Text block (policy + raw text)
+    text_block = {
+        "type": "input_text",
+        "text": header_context + "\n" + instructions + "\n\n"
+        + "---\nSUPPORTING DOCUMENTS (raw text):\n\n"
+        + (raw_docs_text or "").strip()
+    }
 
+    image_blocks = _image_files_to_content_blocks(image_files)
+
+    # Single user message with text + images
     return [
         {
-            "role": "system",
-            "content": header_context + "\n" + instructions,
-        },
-        {
             "role": "user",
-            "content": docs_section,
-        },
+            "content": [text_block, *image_blocks],
+        }
     ]
 
 
@@ -217,6 +268,7 @@ def generate_special_circ_summary(
     request_type: str,
     submitted_by: str,
     raw_docs_text: str,
+    image_files: Iterable | None = None,
     model: str = "gpt-4.1-mini",
 ) -> str:
     """
@@ -226,6 +278,8 @@ def generate_special_circ_summary(
     - Documentation assessment
     - Timeline of events
     - Impact on study
+
+    Includes both text documents and images (screenshots) as inputs.
     """
     if not api_key:
         raise ValueError("Missing OpenAI API key.")
@@ -240,6 +294,7 @@ def generate_special_circ_summary(
         request_type=request_type,
         submitted_by=submitted_by,
         raw_docs_text=raw_docs_text,
+        image_files=image_files,
     )
 
     response = client.responses.create(
@@ -248,9 +303,7 @@ def generate_special_circ_summary(
         temperature=0.2,
     )
 
-    # Responses API: text is in response.output[0].content[0].text
     try:
         return response.output[0].content[0].text
     except Exception:
-        # Fallback: best-effort stringify
         return str(response)
