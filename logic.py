@@ -293,28 +293,27 @@ def load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
 def extract_case_metadata_from_study_plan(file) -> dict:
     """
     Detect from the Study Plan export:
-      - student_number (9-digit, starts with 4)
-      - course_code (e.g. ACM30321)
-      - course_name (best-effort, e.g. 'CIII Wildlife and Animal Care')
+      - student_number (9-digit, starts with 4, even if formatted with spaces)
+      - course_code (e.g. FNS40222)
+      - course_name (best-effort, e.g. 'CIV in Accounting/Bookkeeping')
 
     Student first/last name are NOT present in the exports, so they remain manual.
     """
     raw_bytes = _file_to_bytes(file)
     raw = pd.read_excel(BytesIO(raw_bytes), header=None)
 
-    student_number = None
-    course_code = None
-    course_name = None
+    student_number: str | None = None
+    course_code: str | None = None
+    course_name: str | None = None
 
-    student_pattern = re.compile(r"\b4\d{8}\b")
     course_pattern = re.compile(r"\b[A-Z]{2,4}\d{5}\b")
 
     def looks_like_date_or_number(tok: str) -> bool:
         t = tok.replace("/", "").replace("-", "")
         return t.isdigit() and len(t) >= 4
 
-    # Scan more rows because the course line can be deep in the sheet
-    for i in range(min(200, len(raw))):
+    # Scan ALL rows, not just the first 200
+    for i in range(len(raw)):
         row = raw.iloc[i].astype(str)
         parts = [p for p in row if p not in ("nan", "", " ")]
         if not parts:
@@ -322,19 +321,21 @@ def extract_case_metadata_from_study_plan(file) -> dict:
         text = " ".join(parts)
         tokens = text.split()
 
-        # Student number
+        # ---- Student number: allow formats like '476267132' or '476 267 132' ----
         if student_number is None:
-            m = student_pattern.search(text)
-            if m:
-                student_number = m.group()
+            for tok in tokens:
+                digits = re.sub(r"\D", "", tok)  # strip non-digits
+                if len(digits) == 9 and digits[0] == "4":
+                    student_number = digits
+                    break
 
-        # Course code
+        # ---- Course code (qual code, e.g. FNS40222) ----
         if course_code is None:
             m2 = course_pattern.search(text)
             if m2:
                 course_code = m2.group()
 
-        # Course name (only if we have course_code and haven't set course_name yet)
+        # ---- Course name: taken from the same line as the course code ----
         if course_code and course_name is None and course_code in tokens:
             code_idx = tokens.index(course_code)
 
@@ -350,21 +351,26 @@ def extract_case_metadata_from_study_plan(file) -> dict:
                 t_upper = tokens[idx].upper()
                 if t_upper in level_keywords:
                     level_idx = idx
+                    break
 
-            # If we didn't find a level keyword, just start after the course code
+            # Start of the name:
+            # - if we saw a level keyword (e.g. 'CIV', 'CERTIFICATE'), start there
+            # - otherwise start just after the course code
             start_idx = level_idx if level_idx is not None else code_idx + 1
 
-            # Now collect tokens until we hit something that looks like a date/number
             name_tokens: list[str] = []
             for tok in tokens[start_idx:]:
+                # stop at something that looks like a date/number (eg 20250408)
                 if looks_like_date_or_number(tok):
                     break
                 name_tokens.append(tok)
+                # 🔹 HARD LIMIT: don't let the name run forever into the next column
+                # Most course names are <= 8 words, so we cap it there.
+                if len(name_tokens) >= 8:
+                    break
 
-            name_str = " ".join(name_tokens).strip()
-            # Basic sanity check: don't use extremely short or obviously junk names
             if len(name_tokens) >= 2:
-                course_name = name_str
+                course_name = " ".join(name_tokens).strip()
 
         if student_number and course_code and course_name:
             break
@@ -373,11 +379,9 @@ def extract_case_metadata_from_study_plan(file) -> dict:
         "student_number": student_number,
         "course_code": course_code,
         "course_name": course_name,
-        # Names must still be entered manually
         "first_name": None,
         "last_name": None,
     }
-
 
 # ---------- Core financial logic ----------
 
