@@ -217,7 +217,7 @@ def load_engagement_excel(file) -> pd.DataFrame:
     return df_units
 
 
-ddef load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
+def load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
     """
     Load TQ Student Account export.
 
@@ -225,19 +225,17 @@ ddef load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
 
     We expect:
         'SSP Spk Cd' (unit code)  -> 'ssp_spk_cd'
-        'Txn Amt' (transaction amount; +ve = charge, -ve = payment/reversal) -> 'txn_amt'
+        'Txn Amt' (transaction amount; +ve = charge, -ve = payment) -> 'txn_amt'
 
     Returns:
         unit_prices: DataFrame[unit_code, unit_price]
-            - unit_price is the NET fee per unit after reversals (and any unit-level credits),
-              based on all transactions that carry that unit code.
-        account_balance: float (sum of all txn_amt across the whole account)
+        account_balance: float (sum of all txn_amt)
     """
     raw = pd.read_excel(file, header=None)
 
     # Find header row via 'Txn Amt'
     header_row_idx = None
-    for i in range(min(10, len(raw))):
+    for i in range(min(15, len(raw))):
         row = raw.iloc[i].astype(str)
         if row.str.contains("Txn Amt", case=False, na=False).any():
             header_row_idx = i
@@ -247,39 +245,35 @@ ddef load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
         raise ValueError("Could not find 'Txn Amt' header in student account file.")
 
     header = raw.iloc[header_row_idx]
-    df = raw.iloc[header_row_idx + 1 :].copy()
+    df = raw.iloc[header_row_idx + 1:].copy()
     df.columns = header
 
     df = _normalise_columns(df)
-    # Now we expect 'ssp_spk_cd' and 'txn_amt'
 
     required = ["ssp_spk_cd", "txn_amt"]
     for col in required:
         if col not in df.columns:
             raise ValueError(f"Student account file missing column: {col}")
 
+    # Fix numeric: "527.00", "527,00", etc.
+    df["txn_amt"] = (
+        df["txn_amt"]
+        .astype(str)
+        .str.replace(",", ".", regex=False)
+    )
     df["txn_amt"] = pd.to_numeric(df["txn_amt"], errors="coerce").fillna(0.0)
 
-    # Overall account balance: ALL transactions (charges, reversals, payments)
     account_balance = float(df["txn_amt"].sum())
 
-    # --- NEW LOGIC ---
-    # For unit prices, we want the *net* fee per unit, after reversals.
-    # So we include both positive and negative txn_amt for each unit code.
-    # This handles:
-    #   +156 (charge), -156 (fee reversal), +156 (new charge) -> net 156.
-    per_unit = df.dropna(subset=["ssp_spk_cd"]).copy()
-
-    unit_totals = (
-        per_unit.groupby("ssp_spk_cd", as_index=False)["txn_amt"].sum()
+    charges = df[df["txn_amt"] > 0].copy()
+    unit_prices = (
+        charges.groupby("ssp_spk_cd", as_index=False)["txn_amt"].sum()
+        .rename(columns={"ssp_spk_cd": "unit_code", "txn_amt": "unit_price"})
     )
 
-    # If a unit ends up with a negative net (e.g. fully reversed, or over-credited),
-    # treat its price as 0 for the purposes of our financial impact report.
-    unit_totals["txn_amt"] = unit_totals["txn_amt"].clip(lower=0.0)
-
-    unit_prices = unit_totals.rename(
-        columns={"ssp_spk_cd": "unit_code", "txn_amt": "unit_price"}
+    # Normalise unit codes
+    unit_prices["unit_code"] = (
+        unit_prices["unit_code"].astype(str).str.strip().str.upper()
     )
 
     return unit_prices, account_balance
