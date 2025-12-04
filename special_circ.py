@@ -143,6 +143,12 @@ TAFE Queensland defines special circumstances as those that:
 - Do not make their full impact upon the student until after the start of study or census date/s for a course or specific module/s; and 
 - Make it unreasonable for the student to complete the study requirements for the course or module/s during their allotted timeframe.
 
+Important:
+- The student has **not** been withdrawn yet. They are currently enrolled and are **requesting** withdrawal/refund.
+- Do NOT write as if the student "withdrew" or "has already withdrawn".
+- Use wording such as "the student is seeking withdrawal", "is requesting a refund", or "is currently unable to continue with study", rather than past-tense descriptions of withdrawal.
+
+
 Examples:
 
 Medical reasons:
@@ -194,10 +200,16 @@ Your tasks:
 
 4. Timeline of events
    - Build a chronological timeline of key events, focused on the relevant study period.
-   - Wherever possible, anchor your timeline relative to the EASD / teaching period (e.g. "Shortly after unit start in 08/2024").
+   - Treat the **earliest EASD for financially impactful units** as the commencement of the relevant study period.
+   - Always include at least these two anchor events (if dates are provided in metadata):
+       * dd/mm/yyyy – Course / financially relevant units commence (earliest EASD).
+       * dd/mm/yyyy – Student submits withdrawal/refund request (Date requested).
+   - Then insert other events (onset/worsening of illness, family changes, employment changes, etc.) in order between and around these anchors.
    - Use the format:
        dd/mm/yyyy – brief event description
      If only month/year or approximate timing is known, indicate this (e.g. "Approx. 08/2024 – ...").
+
+
 
 5. Impact on study (summary)
    - Generate a brief summary (3–6 bullet points) of how the circumstances affected the student's ability to:
@@ -269,8 +281,10 @@ def generate_special_circ_summary(
     submitted_by: str,
     raw_docs_text: str,
     image_files: Iterable | None = None,
+    earliest_easd: date | None = None,
     model: str = "gpt-4.1-mini",
 ) -> str:
+
     """
     Call the OpenAI Responses API to generate:
     - Reason for COE
@@ -295,7 +309,9 @@ def generate_special_circ_summary(
         submitted_by=submitted_by,
         raw_docs_text=raw_docs_text,
         image_files=image_files,
+        earliest_easd=earliest_easd,
     )
+
 
     response = client.responses.create(
         model=model,

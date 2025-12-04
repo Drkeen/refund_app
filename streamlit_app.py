@@ -173,11 +173,12 @@ if special_flag:
     )
 
     sc_files = st.file_uploader(
-        "Supporting documents (PDF, DOCX, TXT)",
-        type=["pdf", "docx", "txt"],
+        "Supporting documents (PDF, DOCX, TXT, images)",
+        type=["pdf", "docx", "txt", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
         key="support_docs",
     )
+
 
     if st.button("Generate Special Circumstances timeline and summary with AI"):
         if not sc_files:
@@ -217,7 +218,9 @@ if special_flag:
                                 request_type=request_type,
                                 submitted_by=submitted_by,
                                 raw_docs_text=combined_text,
+                                image_files=sc_files,   # 👈 NEW
                             )
+
                         except Exception as e:
                             st.error(f"Error generating AI summary: {e}")
                         else:
