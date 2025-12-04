@@ -7,6 +7,11 @@ from logic import (
     extract_case_metadata,
 )
 
+from special_circ import (
+    extract_text_from_file,
+    generate_special_circ_summary,
+)
+
 st.set_page_config(
     page_title="Withdrawal Financials Prototype",
     layout="wide",
@@ -154,3 +159,73 @@ if st.button("Generate financial report"):
                 )
 
                 st.code(report_text, language="text")
+
+# ---------- 5. Special circumstances (optional, AI-assisted) ----------
+
+st.header("5. Special circumstances (optional)")
+
+special_flag = st.checkbox("This case includes Special Circumstances documentation")
+
+if special_flag:
+    st.markdown(
+        "Upload any supporting documents (medical certificates, statements, emails, etc.). "
+        "The app will send them to an AI model to build a timeline and summary."
+    )
+
+    sc_files = st.file_uploader(
+        "Supporting documents (PDF, DOCX, TXT)",
+        type=["pdf", "docx", "txt"],
+        accept_multiple_files=True,
+        key="support_docs",
+    )
+
+    if st.button("Generate Special Circumstances timeline and summary with AI"):
+        if not sc_files:
+            st.error("Please upload at least one supporting document.")
+        else:
+            api_key = st.secrets.get("OPENAI_API_KEY", None)
+            if not api_key:
+                st.error(
+                    "No OpenAI API key configured. "
+                    "Add OPENAI_API_KEY to your Streamlit secrets."
+                )
+            else:
+                combined_text_parts = []
+                for f in sc_files:
+                    text = extract_text_from_file(f)
+                    if text.strip():
+                        combined_text_parts.append(
+                            f"===== DOCUMENT: {f.name} =====\n\n{text}"
+                        )
+
+                combined_text = "\n\n\n".join(combined_text_parts).strip()
+
+                if not combined_text:
+                    st.error(
+                        "Could not extract any text from the uploaded documents. "
+                        "Please check file types and try again."
+                    )
+                else:
+                    with st.spinner("Calling AI to analyse documents..."):
+                        try:
+                            sc_summary = generate_special_circ_summary(
+                                api_key=api_key,
+                                student_number=student_number,
+                                course_code=course_code,
+                                course_name=course_name,
+                                request_date=request_date,
+                                request_type=request_type,
+                                submitted_by=submitted_by,
+                                raw_docs_text=combined_text,
+                            )
+                        except Exception as e:
+                            st.error(f"Error generating AI summary: {e}")
+                        else:
+                            st.subheader(
+                                "AI-generated Special Circumstances timeline & summary"
+                            )
+                            st.markdown(sc_summary)
+                            st.caption(
+                                "Review this carefully against the original documents. "
+                                "Edit or trim as needed before including in your recommendation."
+                            )
