@@ -290,21 +290,46 @@ def load_student_account_excel(file) -> Tuple[pd.DataFrame, float]:
 
 # ---------- Metadata extraction from Study Plan ----------
 
-def extract_case_metadata_from_study_plan(file) -> dict:
+def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
     """
-    Detect from the Study Plan export:
-      - student_number (9-digit, starts with 4, even if formatted with spaces)
-      - course_code (e.g. FNS40222)
-      - course_name (best-effort, e.g. 'CIV in Accounting/Bookkeeping')
+    Detect case metadata using:
+      - Student number: prefer Unit Engagement (more consistent)
+      - Course code + course name: from Study Plan
 
-    Student first/last name are NOT present in the exports, so they remain manual.
+    Returns:
+      {
+        "student_number": str | None,
+        "course_code": str | None,
+        "course_name": str | None,
+        "first_name": None,
+        "last_name": None,
+      }
     """
-    raw_bytes = _file_to_bytes(file)
-    raw = pd.read_excel(BytesIO(raw_bytes), header=None)
-
+    # ---------- 1. Student number from Engagement (if provided) ----------
     student_number: str | None = None
+
+    if engagement_file is not None:
+        eng_bytes = _file_to_bytes(engagement_file)
+        raw_eng = pd.read_excel(BytesIO(eng_bytes), header=None)
+
+        # Scan all cells for something like 476267132 or 476 267 132
+        for i in range(len(raw_eng)):
+            row = raw_eng.iloc[i].astype(str)
+            tokens = " ".join(row).split()
+            for tok in tokens:
+                digits = re.sub(r"\D", "", tok)  # strip non-digits
+                if len(digits) == 9 and digits[0] == "4":
+                    student_number = digits
+                    break
+            if student_number:
+                break
+
+    # ---------- 2. Course code + course name from Study Plan ----------
     course_code: str | None = None
     course_name: str | None = None
+
+    sp_bytes = _file_to_bytes(study_plan_file)
+    raw_sp = pd.read_excel(BytesIO(sp_bytes), header=None)
 
     course_pattern = re.compile(r"\b[A-Z]{2,4}\d{5}\b")
 
@@ -312,22 +337,13 @@ def extract_case_metadata_from_study_plan(file) -> dict:
         t = tok.replace("/", "").replace("-", "")
         return t.isdigit() and len(t) >= 4
 
-    # Scan ALL rows, not just the first 200
-    for i in range(len(raw)):
-        row = raw.iloc[i].astype(str)
+    for i in range(len(raw_sp)):
+        row = raw_sp.iloc[i].astype(str)
         parts = [p for p in row if p not in ("nan", "", " ")]
         if not parts:
             continue
         text = " ".join(parts)
         tokens = text.split()
-
-        # ---- Student number: allow formats like '476267132' or '476 267 132' ----
-        if student_number is None:
-            for tok in tokens:
-                digits = re.sub(r"\D", "", tok)  # strip non-digits
-                if len(digits) == 9 and digits[0] == "4":
-                    student_number = digits
-                    break
 
         # ---- Course code (qual code, e.g. FNS40222) ----
         if course_code is None:
@@ -354,25 +370,21 @@ def extract_case_metadata_from_study_plan(file) -> dict:
                     break
 
             # Start of the name:
-            # - if we saw a level keyword (e.g. 'CIV', 'CERTIFICATE'), start there
-            # - otherwise start just after the course code
             start_idx = level_idx if level_idx is not None else code_idx + 1
 
             name_tokens: list[str] = []
             for tok in tokens[start_idx:]:
-                # stop at something that looks like a date/number (eg 20250408)
                 if looks_like_date_or_number(tok):
                     break
                 name_tokens.append(tok)
-                # 🔹 HARD LIMIT: don't let the name run forever into the next column
-                # Most course names are <= 8 words, so we cap it there.
+                # Hard cap so we don't eat the next column's text
                 if len(name_tokens) >= 8:
                     break
 
             if len(name_tokens) >= 2:
                 course_name = " ".join(name_tokens).strip()
 
-        if student_number and course_code and course_name:
+        if course_code and course_name:
             break
 
     return {
