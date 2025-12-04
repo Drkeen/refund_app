@@ -374,9 +374,17 @@ def extract_case_metadata(study_plan_file, engagement_file=None) -> dict:
 
             name_tokens: list[str] = []
             for tok in tokens[start_idx:]:
+                # Stop at something that looks like a date/number
                 if looks_like_date_or_number(tok):
                     break
+
+                # Stop if this looks like a surname / staff code from the next column
+                upper_tok = tok.upper()
+                if tok.isalpha() and tok == upper_tok and len(tok) >= 5:
+                    break
+
                 name_tokens.append(tok)
+
                 # Hard cap so we don't eat the next column's text
                 if len(name_tokens) >= 8:
                     break
