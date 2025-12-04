@@ -10,6 +10,9 @@ from pypdf import PdfReader
 import docx
 
 
+# ---------- Text extraction for non-image files ----------
+
+
 def extract_text_from_file(file) -> str:
     """
     Extract plain text from an uploaded file.
@@ -72,7 +75,10 @@ def extract_text_from_file(file) -> str:
         return ""
 
 
-def _image_files_to_content_blocks(files: Iterable) -> List[dict]:
+# ---------- Image helper for Vision ----------
+
+
+def _image_files_to_content_blocks(files: Iterable | None) -> List[dict]:
     """
     Convert uploaded image files to OpenAI 'input_image' content blocks
     using data URLs.
@@ -110,6 +116,9 @@ def _image_files_to_content_blocks(files: Iterable) -> List[dict]:
     return blocks
 
 
+# ---------- Prompt builder ----------
+
+
 def build_special_circ_input_items(
     student_number: str,
     course_code: str,
@@ -119,22 +128,35 @@ def build_special_circ_input_items(
     submitted_by: str,
     raw_docs_text: str,
     image_files: Iterable | None = None,
+    earliest_easd: date | None = None,
 ) -> list[dict]:
     """
     Build the input items for the OpenAI Responses API, using TAFE QLD
     special circumstances wording and structure, including optional images.
+
+    earliest_easd:
+        The earliest EASD among financially impactful units, coming from logic.py.
+        This is treated as the commencement of the relevant study period.
     """
+    if earliest_easd:
+        commencement_str = earliest_easd.strftime("%d/%m/%Y")
+    else:
+        commencement_str = "Not clearly specified (earliest EASD unavailable)"
+
     header_context = f"""You are assisting with a TAFE Queensland fee review for a Special Circumstances case.
 
 Case metadata:
 - Student number: {student_number or "N/A"}
 - Course: {course_code} - {course_name}
 - Request type: {request_type}
-- Date requested: {request_date.strftime("%d/%m/%Y")}
+- Withdrawal application date (student's request date): {request_date.strftime("%d/%m/%Y")}
+- Enrolment Activity Start Date (EASD) used as course commencement: {commencement_str}
 - Submitted by: {submitted_by}
 
-You are given supporting documentation (medical certificates, statements, emails, etc.).
-Your job is to assess the case against TAFE Queensland's Special Circumstances guidelines and produce structured notes suitable for an internal recommendation.
+Important context:
+- At the time of this request, the student is still enrolled. Withdrawal / refund has NOT yet been processed.
+- This report is based on the student's application to withdraw / seek a refund, not a withdrawal that has already occurred.
+- Your focus is on why the student is seeking withdrawal/refund and whether those circumstances meet Special Circumstances criteria.
 """
 
     instructions = """
@@ -143,13 +165,15 @@ TAFE Queensland defines special circumstances as those that:
 - Do not make their full impact upon the student until after the start of study or census date/s for a course or specific module/s; and 
 - Make it unreasonable for the student to complete the study requirements for the course or module/s during their allotted timeframe.
 
-Important:
-- The student has **not** been withdrawn yet. They are currently enrolled and are **requesting** withdrawal/refund.
+Important wording rules:
+- The student has NOT been withdrawn yet. They are currently enrolled and are requesting withdrawal and/or refund.
 - Do NOT write as if the student "withdrew" or "has already withdrawn".
-- Use wording such as "the student is seeking withdrawal", "is requesting a refund", or "is currently unable to continue with study", rather than past-tense descriptions of withdrawal.
+- Use language such as "the student is seeking withdrawal", "is requesting a refund", "is currently unable to continue with study", etc.
+- When you refer to dates:
+    * Treat the Enrolment Activity Start Date (EASD) provided in metadata as the commencement of the relevant study period for financially impactful units.
+    * Treat the "withdrawal application date" (Date Requested) as the date the student lodged their request for withdrawal/refund.
 
-
-Examples:
+Examples of Special Circumstances:
 
 Medical reasons:
 - The medical condition only becomes apparent after the start of study or census date/s and the effects are sufficiently serious that it is unrealistic for the student to continue with their studies.
@@ -200,16 +224,16 @@ Your tasks:
 
 4. Timeline of events
    - Build a chronological timeline of key events, focused on the relevant study period.
-   - Treat the **earliest EASD for financially impactful units** as the commencement of the relevant study period.
-   - Always include at least these two anchor events (if dates are provided in metadata):
+   - Always anchor the timeline using:
+       * Enrolment Activity Start Date (EASD) for the earliest financially impactful unit as the commencement of the study period.
+       * The withdrawal application date (Date Requested) as the point where the student formally requested withdrawal/refund.
+   - At minimum, include explicit entries for:
        * dd/mm/yyyy – Course / financially relevant units commence (earliest EASD).
-       * dd/mm/yyyy – Student submits withdrawal/refund request (Date requested).
-   - Then insert other events (onset/worsening of illness, family changes, employment changes, etc.) in order between and around these anchors.
+       * dd/mm/yyyy – Student lodges withdrawal/refund application with TAFE Queensland.
+   - Then insert other key events (onset/worsening of illness, family changes, employment changes, etc.) in chronological order around these anchors.
    - Use the format:
        dd/mm/yyyy – brief event description
      If only month/year or approximate timing is known, indicate this (e.g. "Approx. 08/2024 – ...").
-
-
 
 5. Impact on study (summary)
    - Generate a brief summary (3–6 bullet points) of how the circumstances affected the student's ability to:
@@ -252,23 +276,28 @@ Important:
 - Keep wording neutral and professional, suitable for internal recommendation notes.
 """
 
-    # Text block (policy + raw text)
     text_block = {
         "type": "input_text",
-        "text": header_context + "\n" + instructions + "\n\n"
+        "text": header_context
+        + "\n"
+        + instructions
+        + "\n\n"
         + "---\nSUPPORTING DOCUMENTS (raw text):\n\n"
         + (raw_docs_text or "").strip()
     }
 
     image_blocks = _image_files_to_content_blocks(image_files)
 
-    # Single user message with text + images
+    # Single user message with text + any images
     return [
         {
             "role": "user",
             "content": [text_block, *image_blocks],
         }
     ]
+
+
+# ---------- OpenAI call wrapper ----------
 
 
 def generate_special_circ_summary(
@@ -284,13 +313,12 @@ def generate_special_circ_summary(
     earliest_easd: date | None = None,
     model: str = "gpt-4.1-mini",
 ) -> str:
-
     """
     Call the OpenAI Responses API to generate:
     - Reason for COE
     - Special Circumstances eligibility assessment
     - Documentation assessment
-    - Timeline of events
+    - Timeline of events (anchored on earliest EASD + withdrawal application date)
     - Impact on study
 
     Includes both text documents and images (screenshots) as inputs.
@@ -311,7 +339,6 @@ def generate_special_circ_summary(
         image_files=image_files,
         earliest_easd=earliest_easd,
     )
-
 
     response = client.responses.create(
         model=model,
