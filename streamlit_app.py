@@ -46,12 +46,17 @@ course_name_default = ""
 
 if study_plan_file is not None:
     try:
-        meta = extract_case_metadata_from_study_plan(study_plan_file)
+        # Prefer student number from Engagement if it's already uploaded,
+        # and course code/name from Study Plan.
+        meta = extract_case_metadata(
+            study_plan_file=study_plan_file,
+            engagement_file=engagement_file if engagement_file is not None else None,
+        )
         student_default = meta.get("student_number") or ""
         course_code_default = meta.get("course_code") or ""
         course_name_default = meta.get("course_name") or ""
     except Exception as e:
-        st.error(f"Could not extract case details from Study Plan: {e}")
+        st.error(f"Could not extract case details from uploaded files: {e}")
 
 
 col1, col2 = st.columns(2)
