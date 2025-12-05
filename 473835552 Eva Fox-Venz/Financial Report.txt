@@ -1,0 +1,32 @@
+473835552
+
+Withdrawal & Refund
+
+05/12/2025
+
+Student
+
+CHC33021 - Certificate III in Individual Support Disability
+
+Student current financials:
+
+CHCCCS033 [ENG: 41.25] Fee Waiver $5.00
+CHCLEG001 [ENG: 32.42] Fee Waiver $5.00
+CHCCOM005 [ENG: 10.60] Fee Waiver $5.00
+CHCCCS031 [ENG: 73.58] Fee Waiver $5.00
+CHCCCS040 [ENG: 50.87] Fee Waiver $5.00
+CHCDIV001 [ENG: 13.25] Fee Waiver $5.00
+HLTINF006 [ENG: 9.27] Fee Waiver $5.00
+HLTWHS002 [ENG: 6.62] Fee Waiver $5.00
+
+Totals:
+Total Fee Waiver: $40.00 (8 unit(s))
+Total EWID: $0.00 (0 unit(s))
+
+Account Balance: $0.00
+Total of Fee Waiver and EWID: $40.00
+Estimated remaining balance: $-40.00
+=> Refund to student: $40.00
+
+Recommendation:
+Post EASD WID FREF 8 units and apply fee waiver of $40.00 (8 @ $5.00) = $40.00 credited to student account. Administration fee applicable. $40.00 - $100.00 Administration fee = no refund to student.
