@@ -1,0 +1,30 @@
+476374346
+
+Withdrawal & Refund
+
+19/11/2025
+
+Student
+
+11240NAT - Certificate IV in Adult Tertiary Preparation
+
+Student current financials:
+
+NAT11240005 [NATT] Pre EASD EWID $281.00
+NAT11240010 [NATT] Pre EASD EWID $281.00
+NAT11240006 [NATT] Pre EASD EWID $281.00
+NAT11240011 [NATT] Pre EASD EWID $281.00
+NAT11240002 [ENG: 27.27] Fee Waiver $281.00
+
+Totals:
+Total Fee Waiver: $281.00 (1 unit(s))
+Total EWID: $1,124.00 (4 unit(s))
+
+Account Balance: $1,124.00
+Total of Fee Waiver and EWID: $1,405.00
+Estimated remaining balance: $-281.00
+=> Refund to student: $281.00
+
+Recommendation:
+Post EASD WID FREF 1 units and apply fee waiver of $281.00 (1 @ $281.00)
+Pre EASD EWID FREF 4 units and apply EWID of $1,124.00 (4 @ $281.00) = $1,405.00 credited to student account. $281.00 credit - $100.00 Administration fee = $181.00 refund to student.
